@@ -12,6 +12,13 @@
 
 [Iolive](https://github.com/Rabbit0w0/Iolive) is an application for displaying Live2D model with face tracking support.
 
+## TODOs
+- Add more customizable things
+- Remember window size and model position
+- Improve performance
+- Gather stars
+Check out this repo next month! (December, 2022)
+
 ## Build
 this project can be built using MSVC 141+, and cmake version > 3.13
 

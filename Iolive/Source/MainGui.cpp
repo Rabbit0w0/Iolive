@@ -132,7 +132,7 @@ namespace Iolive {
 		ImGuiIO& io = ImGui::GetIO();
 		io.DisplaySize = ImVec2(width, height);
 
-		ImGui::SetNextWindowSize(ImVec2(320, 500), ImGuiCond_Once);
+		ImGui::SetNextWindowSize(ImVec2(600, 240), ImGuiCond_Once);
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(250, 400));
 		{
 			ImGui::Begin("Main Iolive GUI");
@@ -329,7 +329,7 @@ namespace Iolive {
 				*/
 				if (ImGui::BeginTabItem("About"))
 				{
-					ImGui::Text("> Iolive version %s.%s", IOLIVE_MAJOR_VERSION_STR, IOLIVE_MINOR_VERSION_STR);
+					ImGui::Text("> Iolive version %s.%s.%s%s", IOLIVE_MAJOR_VERSION_STR, IOLIVE_MINOR_VERSION_STR, IOLIVE_BUILD_NUM, IOLIVE_DEBUG == 0 ? "b" : "rc");
 					ImGui::Text("> See the project on"); ImGui::SameLine();
 					ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.f);
 					if (ImGui::Button("Github"))
