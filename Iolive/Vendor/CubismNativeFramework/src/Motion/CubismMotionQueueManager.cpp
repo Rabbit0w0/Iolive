@@ -8,6 +8,7 @@
 #include "CubismMotionQueueManager.hpp"
 #include "CubismMotionQueueEntry.hpp"
 #include "CubismFramework.hpp"
+#include "CubismMotion.hpp"
 
 namespace Live2D { namespace Cubism { namespace Framework {
 
@@ -30,7 +31,7 @@ CubismMotionQueueManager::~CubismMotionQueueManager()
     }
 }
 
-CubismMotionQueueEntryHandle CubismMotionQueueManager::StartMotion(ACubismMotion* motion, csmBool autoDelete, csmFloat32 userTimeSeconds, bool stopOtherMotion)
+CubismMotionQueueEntryHandle CubismMotionQueueManager::StartMotion(ACubismMotion* motion, csmBool autoDelete, csmFloat32 userTimeSeconds)
 {
     if (motion == NULL)
     {
@@ -39,44 +40,28 @@ CubismMotionQueueEntryHandle CubismMotionQueueManager::StartMotion(ACubismMotion
 
     CubismMotionQueueEntry* motionQueueEntry = NULL;
 
-    bool doCreateNewMotion = true;
-    if (stopOtherMotion == true)
+    // 既にモーションがあれば終了フラグを立てる
+    for (csmUint32 i = 0; i < _motions.GetSize(); ++i)
     {
-        // 既にモーションがあれば終了フラグを立てる
-        for (csmUint32 i = 0; i < _motions.GetSize(); ++i)
+        motionQueueEntry = _motions.At(i);
+        if (motionQueueEntry == NULL)
         {
-            motionQueueEntry = _motions.At(i);
-            if (motionQueueEntry == NULL)
-            {
-                continue;
-            }
-
-            motionQueueEntry->SetFadeout(motionQueueEntry->_motion->GetFadeOutTime());
-            motionQueueEntry->StartFadeout(motionQueueEntry->_motion->GetFadeOutTime(), this->_userTimeSeconds);
-            if (motion == motionQueueEntry->_motion)
-            {
-                doCreateNewMotion = false;
-            }
+            continue;
         }
+
+        motionQueueEntry->SetFadeout(motionQueueEntry->_motion->GetFadeOutTime());
     }
 
-    if (doCreateNewMotion)
-    {
-        motionQueueEntry = CSM_NEW CubismMotionQueueEntry(); // 終了時に破棄する
-        motionQueueEntry->_autoDelete = autoDelete;
-        motionQueueEntry->_motion = motion;
+    motionQueueEntry = CSM_NEW CubismMotionQueueEntry(); // 終了時に破棄する
+    motionQueueEntry->_autoDelete = autoDelete;
+    motionQueueEntry->_motion = motion;
 
-        _motions.PushBack(motionQueueEntry, false);
+    _motions.PushBack(motionQueueEntry, false);
 
-        return motionQueueEntry->_motionQueueEntryHandle;
-    }
-    else
-    {
-        return nullptr;
-    }
+    return motionQueueEntry->_motionQueueEntryHandle;
 }
 
-csmBool CubismMotionQueueManager::DoUpdateMotion(CubismModel* model, csmFloat32 userTimeSeconds)
+csmBool CubismMotionQueueManager::DoUpdateMotion(CubismModel* model, csmFloat32 userTimeSeconds, csmFloat32* opacity)
 {
     csmBool updated = false;
 
@@ -107,6 +92,12 @@ csmBool CubismMotionQueueManager::DoUpdateMotion(CubismModel* model, csmFloat32 
         motion->UpdateParameters(model, motionQueueEntry, userTimeSeconds);
         updated = true;
 
+        // ------ 不透明度の値が存在すれば反映する ------
+        if (opacity)
+        {
+            *opacity = motion->GetOpacityValue(userTimeSeconds - motionQueueEntry->GetStartTime());
+        }
+
         // ------ ユーザトリガーイベントを検査する ----
         const csmVector<const csmString*>& firedList = motion->GetFiredEvent(
             motionQueueEntry->GetLastCheckEventTime() - motionQueueEntry->GetStartTime()
@@ -132,7 +123,7 @@ csmBool CubismMotionQueueManager::DoUpdateMotion(CubismModel* model, csmFloat32 
             {
                 motionQueueEntry->StartFadeout(motionQueueEntry->GetFadeOutSeconds(), userTimeSeconds);
             }
-            
+
             ++ite;
         }
     }

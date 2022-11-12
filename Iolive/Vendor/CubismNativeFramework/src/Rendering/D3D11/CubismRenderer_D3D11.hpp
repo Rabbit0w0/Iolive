@@ -13,6 +13,7 @@
 #include "CubismFramework.hpp"
 #include "Type/csmVector.hpp"
 #include "Type/csmRectF.hpp"
+#include "Math/CubismVector2.hpp"
 #include "Type/csmMap.hpp"
 #include "Rendering/D3D11/CubismOffscreenSurface_D3D11.hpp"
 #include "CubismRenderState_D3D11.hpp"
@@ -125,15 +126,15 @@ private:
      *@param  size -> クリッピングマスクバッファのサイズ
      *
      */
-    void SetClippingMaskBufferSize(csmInt32 size);
+    void SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height);
 
     /**
-     *@brief  クリッピングマスクバッファのサイズを取得する
+     * @brief  クリッピングマスクバッファのサイズを取得する
      *
-     *@return クリッピングマスクバッファのサイズ
+     * @return クリッピングマスクバッファのサイズ
      *
      */
-    csmInt32 GetClippingMaskBufferSize() const;
+    CubismVector2 GetClippingMaskBufferSize() const;
 
     CubismOffscreenFrame_D3D11*  _colorBuffer;   ///< マスク用カラーバッファーのアドレス
     csmInt32    _currentFrameNo;         ///< マスクテクスチャに与えるフレーム番号
@@ -141,7 +142,7 @@ private:
     csmVector<CubismRenderer::CubismTextureColor*>  _channelColors;
     csmVector<CubismClippingContext*>               _clippingContextListForMask;   ///< マスク用クリッピングコンテキストのリスト
     csmVector<CubismClippingContext*>               _clippingContextListForDraw;   ///< 描画用クリッピングコンテキストのリスト
-    csmInt32                                        _clippingMaskBufferSize; ///< クリッピングマスクのバッファサイズ（初期値:256）
+    CubismVector2                                   _clippingMaskBufferSize; ///< クリッピングマスクのバッファサイズ（初期値:256）
 
     CubismMatrix44  _tmpMatrix;              ///< マスク計算用の行列
     CubismMatrix44  _tmpMatrixForMask;       ///< マスク計算用の行列
@@ -308,7 +309,7 @@ public:
      * @param[in]  size -> クリッピングマスクバッファのサイズ
      *
      */
-    void SetClippingMaskBufferSize(csmInt32 size);
+    void SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height);
 
     /**
      * @brief  クリッピングマスクバッファのサイズを取得する
@@ -316,14 +317,24 @@ public:
      * @return クリッピングマスクバッファのサイズ
      *
      */
-    csmInt32 GetClippingMaskBufferSize() const;
+    CubismVector2 GetClippingMaskBufferSize() const;
+
+    /**
+     * @brief  クリッピングマスクのバッファを取得する
+     *
+     * @return クリッピングマスクのバッファへの参照
+     *
+     */
+    const csmVector<CubismOffscreenFrame_D3D11>& GetMaskBuffer() const;
 
     /**
      * @brief  使用するシェーダの設定・コンスタントバッファの設定などを行い、描画を実行
      *
      * @param[in]  device          -> 使用デバイス
-     * @param[in]  textureNo        -> 使用テクスチャ番号。基本的にCubismModel::GetDrawableTextureIndicesで返されたもの
+     * @param[in]  textureNo        -> 使用テクスチャ番号。基本的にCubismModel::GetDrawableTextureIndexで返されたもの
      * @param[in]  modelColorRGBA   -> 描画カラー
+     * @param[in]  multiplyColor   -> 乗算色
+     * @param[in]  screenColor   -> スクリーン色
      * @param[in]  colorBlendMode   -> ブレンドモード
      * @param[in]  invertedMask      -> マスク使用時のマスクの反転使用
      *
@@ -331,7 +342,7 @@ public:
     void ExecuteDraw(ID3D11Device* device, ID3D11DeviceContext* renderContext,
         ID3D11Buffer* vertexBuffer, ID3D11Buffer* indexBuffer, ID3D11Buffer* constantBuffer,
         const csmInt32 indexCount,
-        const csmInt32 textureNo, CubismTextureColor& modelColorRGBA, CubismBlendMode colorBlendMode, csmBool invertedMask);
+        const csmInt32 textureNo, CubismTextureColor& modelColorRGBA, const CubismTextureColor& multiplyColor, const CubismTextureColor& screenColor, CubismBlendMode colorBlendMode, csmBool invertedMask);
 
 protected:
     /**
@@ -374,6 +385,7 @@ protected:
     void DrawMeshDX11(csmInt32 drawableIndex
         , csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
         , csmUint16* indexArray, csmFloat32* vertexArray, csmFloat32* uvArray
+        , const CubismTextureColor& multiplyColor, const CubismTextureColor& screenColor
         , csmFloat32 opacity, CubismBlendMode colorBlendMode, csmBool invertedMask);
 
 

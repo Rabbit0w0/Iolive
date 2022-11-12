@@ -40,10 +40,10 @@ public:
      * デストラクタ。
      */
     virtual ~CubismMotionQueueEntry();
-    
+
     /**
      * @brief フェードアウト開始の設定
-     * 
+     *
      * フェードアウトの開始を設定する。
      *
      * @param[in]   fadeOutSeconds     フェードアウトにかかる時間[秒]
@@ -233,7 +233,7 @@ public:
     *
     * @return    フェードアウト開始[秒]
     */
-    csmBool     GetFadeOutSeconds();
+    csmFloat32     GetFadeOutSeconds();
 
 private:
     csmBool         _autoDelete;                    ///< 自動削除

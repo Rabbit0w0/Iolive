@@ -143,13 +143,13 @@ void Model2D::DoStartExpression(ACubismMotion* motion)
 		}
 	}
 
-	CubismMotionQueueEntryHandle newQueueEntryHandler = _expressionManager->StartMotion(motion, false, /*unused*/0.0f, false);
+	CubismMotionQueueEntryHandle newQueueEntryHandler = _expressionManager->StartMotion(motion, false, /*unused*/0.0f);
 	m_MapActiveExpression[motion] = newQueueEntryHandler;
 }
 
 void Model2D::DoStartMotion(ACubismMotion* motion)
 {
-	CubismMotionQueueEntryHandle newQueueEntryHandler = _motionManager->StartMotion(motion, false, /*unused*/0.0f, true);
+	CubismMotionQueueEntryHandle newQueueEntryHandler = _motionManager->StartMotion(motion, false, /*unused*/0.0f);
 }
 
 bool Model2D::SetupModelSetting(ICubismModelSetting* modelSetting)

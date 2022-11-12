@@ -303,7 +303,7 @@ void Ioface::EstimateFeatureDistance(const cv::Mat& landmarks)
 	cv::Point pMouthRight = cv::Point(landmarks.at<float>(0, 37), landmarks.at<float>(1, 37));
 	this->MouthForm = L2Norm(pMouthLeft, pMouthRight);
 
-	// eye brow (distance between brow & top nose)
+	// Ã¼Ã«
 	cv::Point pBrowLeft = cv::Point(landmarks.at<float>(0, 4), landmarks.at<float>(1, 4));
 	cv::Point pBrowRight = cv::Point(landmarks.at<float>(0, 5), landmarks.at<float>(1, 5));
 	this->EyeBrowLY = L2Norm(pTopNose, pBrowLeft);
@@ -312,7 +312,7 @@ void Ioface::EstimateFeatureDistance(const cv::Mat& landmarks)
 
 std::tuple<float, float> Ioface::GetEyeAspectRatio(const cv::Mat& landmarks)
 {
-	/* Reference: https://www.pyimagesearch.com/2017/04/24/eye-blink-detection-opencv-python-dlib/
+	/* ²éÔÄ×ÊÁÏ: https://www.pyimagesearch.com/2017/04/24/eye-blink-detection-opencv-python-dlib/
 	*/
 
 	// left eye

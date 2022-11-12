@@ -12,6 +12,7 @@
 #include "CubismOffscreenSurface_OpenGLES2.hpp"
 #include "Type/csmVector.hpp"
 #include "Type/csmRectF.hpp"
+#include "Math/CubismVector2.hpp"
 #include "Type/csmMap.hpp"
 
 #ifdef CSM_TARGET_ANDROID_ES2
@@ -135,7 +136,7 @@ private:
      *@param  size -> クリッピングマスクバッファのサイズ
      *
      */
-    void SetClippingMaskBufferSize(csmInt32 size);
+    void SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height);
 
     /**
      *@brief  クリッピングマスクバッファのサイズを取得する
@@ -143,14 +144,14 @@ private:
      *@return クリッピングマスクバッファのサイズ
      *
      */
-    csmInt32 GetClippingMaskBufferSize() const;
+    CubismVector2 GetClippingMaskBufferSize() const;
 
     csmInt32    _currentFrameNo;         ///< マスクテクスチャに与えるフレーム番号
 
     csmVector<CubismRenderer::CubismTextureColor*>  _channelColors;
     csmVector<CubismClippingContext*>               _clippingContextListForMask;   ///< マスク用クリッピングコンテキストのリスト
     csmVector<CubismClippingContext*>               _clippingContextListForDraw;   ///< 描画用クリッピングコンテキストのリスト
-    csmInt32                                        _clippingMaskBufferSize; ///< クリッピングマスクのバッファサイズ（初期値:256）
+    CubismVector2                                   _clippingMaskBufferSize; ///< クリッピングマスクのバッファサイズ（初期値:256）
 
     CubismMatrix44  _tmpMatrix;              ///< マスク計算用の行列
     CubismMatrix44  _tmpMatrixForMask;       ///< マスク計算用の行列
@@ -243,6 +244,8 @@ private:
         GLint SamplerTexture0Location;      ///< シェーダプログラムに渡す変数のアドレス(Texture0)
         GLint SamplerTexture1Location;      ///< シェーダプログラムに渡す変数のアドレス(Texture1)
         GLint UniformBaseColorLocation;     ///< シェーダプログラムに渡す変数のアドレス(BaseColor)
+        GLint UniformMultiplyColorLocation; ///< シェーダプログラムに渡す変数のアドレス(MultiplyColor)
+        GLint UniformScreenColorLocation;   ///< シェーダプログラムに渡す変数のアドレス(ScreenColor)
         GLint UnifromChannelFlagLocation;   ///< シェーダプログラムに渡す変数のアドレス(ChannelFlag)
     };
 
@@ -276,6 +279,8 @@ private:
                             , csmFloat32* uvArray, csmFloat32 opacity
                             , CubismRenderer::CubismBlendMode colorBlendMode
                             , CubismRenderer::CubismTextureColor baseColor
+                            , CubismRenderer::CubismTextureColor multiplyColor
+                            , CubismRenderer::CubismTextureColor screenColor
                             , csmBool isPremultipliedAlpha, CubismMatrix44 matrix4x4
                             , csmBool invertedMask);
 
@@ -458,7 +463,7 @@ public:
      * @param[in]  size -> クリッピングマスクバッファのサイズ
      *
      */
-    void SetClippingMaskBufferSize(csmInt32 size);
+    void SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height);
 
     /**
      * @brief  クリッピングマスクバッファのサイズを取得する
@@ -466,7 +471,15 @@ public:
      * @return クリッピングマスクバッファのサイズ
      *
      */
-    csmInt32 GetClippingMaskBufferSize() const;
+    CubismVector2 GetClippingMaskBufferSize() const;
+
+    /**
+     * @brief  クリッピングマスクのバッファを取得する
+     *
+     * @return クリッピングマスクのバッファへのポインタ
+     *
+     */
+    const CubismOffscreenFrame_OpenGLES2* GetMaskBuffer() const;
 
 protected:
     /**
@@ -483,7 +496,11 @@ protected:
      * @brief   モデルを描画する実際の処理
      *
      */
-    void DoDrawModel();
+    virtual void DoDrawModel() override;
+
+    void DrawMesh(csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
+            , csmUint16* indexArray, csmFloat32* vertexArray, csmFloat32* uvArray
+            , csmFloat32 opacity, CubismBlendMode colorBlendMode, csmBool invertedMask) override;
 
     /**
      * @brief   [オーバーライド]<br>
@@ -496,13 +513,16 @@ protected:
      * @param[in]   indexArray      ->  ポリゴンメッシュのインデックス配列
      * @param[in]   vertexArray     ->  ポリゴンメッシュの頂点配列
      * @param[in]   uvArray         ->  uv配列
+     * @param[in]   multiplyColor    ->  乗算色
+     * @param[in]   screenColor         ->  スクリーン色
      * @param[in]   opacity         ->  不透明度
      * @param[in]   colorBlendMode  ->  カラー合成タイプ
      * @param[in]   invertedMask     ->  マスク使用時のマスクの反転使用
      *
      */
-    void DrawMesh(csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
+    void DrawMeshOpenGL(csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
                   , csmUint16* indexArray, csmFloat32* vertexArray, csmFloat32* uvArray
+                  , const CubismTextureColor& multiplyColor, const CubismTextureColor& screenColor
                   , csmFloat32 opacity, CubismBlendMode colorBlendMode, csmBool invertedMask);
 
 

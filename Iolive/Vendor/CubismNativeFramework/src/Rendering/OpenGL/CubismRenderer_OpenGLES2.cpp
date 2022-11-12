@@ -15,6 +15,12 @@
 #include <Windows.h>
 #endif
 
+#define CSM_FRAGMENT_SHADER_FP_PRECISION_HIGH "highp"
+#define CSM_FRAGMENT_SHADER_FP_PRECISION_MID "mediump"
+#define CSM_FRAGMENT_SHADER_FP_PRECISION_LOW "lowp"
+
+#define CSM_FRAGMENT_SHADER_FP_PRECISION CSM_FRAGMENT_SHADER_FP_PRECISION_HIGH
+
 //------------ LIVE2D NAMESPACE ------------
 namespace Live2D { namespace Cubism { namespace Framework { namespace Rendering {
 
@@ -28,7 +34,7 @@ const csmInt32 ColorChannelCount = 4;   ///< 実験時に1チャンネルの場�
 
 CubismClippingManager_OpenGLES2::CubismClippingManager_OpenGLES2() :
                                                                    _currentFrameNo(0)
-                                                                   , _clippingMaskBufferSize(256)
+                                                                   , _clippingMaskBufferSize(256, 256)
 {
     CubismRenderer::CubismTextureColor* tmp;
     tmp = CSM_NEW CubismRenderer::CubismTextureColor();
@@ -165,7 +171,7 @@ void CubismClippingManager_OpenGLES2::SetupClippingContext(CubismModel& model, C
         if (!renderer->IsUsingHighPrecisionMask())
         {
             // 生成したFrameBufferと同じサイズでビューポートを設定
-            glViewport(0, 0, _clippingMaskBufferSize, _clippingMaskBufferSize);
+            glViewport(0, 0, _clippingMaskBufferSize.X, _clippingMaskBufferSize.Y);
 
             // モデル描画時にDrawMeshNowに渡される変換（モデルtoワールド座標変換）
             CubismMatrix44 modelToWorldF = renderer->GetMvpMatrix();
@@ -191,17 +197,54 @@ void CubismClippingManager_OpenGLES2::SetupClippingContext(CubismModel& model, C
             CubismClippingContext* clipContext = _clippingContextListForMask[clipIndex];
             csmRectF* allClippedDrawRect = clipContext->_allClippedDrawRect; //このマスクを使う、全ての描画オブジェクトの論理座標上の囲み矩形
             csmRectF* layoutBoundsOnTex01 = clipContext->_layoutBounds; //この中にマスクを収める
-
-            // モデル座標上の矩形を、適宜マージンを付けて使う
             const csmFloat32 MARGIN = 0.05f;
-            _tmpBoundsOnModel.SetRect(allClippedDrawRect);
-            _tmpBoundsOnModel.Expand(allClippedDrawRect->Width * MARGIN, allClippedDrawRect->Height * MARGIN);
-            //########## 本来は割り当てられた領域の全体を使わず必要最低限のサイズがよい
+            csmFloat32 scaleX = 0.0f;
+            csmFloat32 scaleY = 0.0f;
 
-            // シェーダ用の計算式を求める。回転を考慮しない場合は以下のとおり
-            // movePeriod' = movePeriod * scaleX + offX     [[ movePeriod' = (movePeriod - tmpBoundsOnModel.movePeriod)*scale + layoutBoundsOnTex01.movePeriod ]]
-            const csmFloat32 scaleX = layoutBoundsOnTex01->Width / _tmpBoundsOnModel.Width;
-            const csmFloat32 scaleY = layoutBoundsOnTex01->Height / _tmpBoundsOnModel.Height;
+
+            if (renderer->IsUsingHighPrecisionMask())
+            {
+                const csmFloat32 ppu = model.GetPixelsPerUnit();
+                const csmFloat32 maskPixelWidth = clipContext->_owner->_clippingMaskBufferSize.X;
+                const csmFloat32 maskPixelHeight = clipContext->_owner->_clippingMaskBufferSize.Y;
+                const csmFloat32 physicalMaskWidth = layoutBoundsOnTex01->Width * maskPixelWidth;
+                const csmFloat32 physicalMaskHeight = layoutBoundsOnTex01->Height * maskPixelHeight;
+
+
+                _tmpBoundsOnModel.SetRect(allClippedDrawRect);
+
+                if (_tmpBoundsOnModel.Width * ppu > physicalMaskWidth)
+                {
+                    _tmpBoundsOnModel.Expand(allClippedDrawRect->Width * MARGIN, 0.0f);
+                    scaleX = layoutBoundsOnTex01->Width / _tmpBoundsOnModel.Width;
+                }
+                else
+                {
+                    scaleX = ppu / physicalMaskWidth;
+                }
+
+                if (_tmpBoundsOnModel.Height * ppu > physicalMaskHeight)
+                {
+                    _tmpBoundsOnModel.Expand(0.0f, allClippedDrawRect->Height * MARGIN);
+                    scaleY = layoutBoundsOnTex01->Height / _tmpBoundsOnModel.Height;
+                }
+                else
+                {
+                    scaleY = ppu / physicalMaskHeight;
+                }
+            }
+            else
+            {
+                // モデル座標上の矩形を、適宜マージンを付けて使う
+                _tmpBoundsOnModel.SetRect(allClippedDrawRect);
+                _tmpBoundsOnModel.Expand(allClippedDrawRect->Width * MARGIN, allClippedDrawRect->Height * MARGIN);
+                //########## 本来は割り当てられた領域の全体を使わず必要最低限のサイズがよい
+                // シェーダ用の計算式を求める。回転を考慮しない場合は以下のとおり
+                // movePeriod' = movePeriod * scaleX + offX     [[ movePeriod' = (movePeriod - tmpBoundsOnModel.movePeriod)*scale + layoutBoundsOnTex01.movePeriod ]]
+                scaleX = layoutBoundsOnTex01->Width / _tmpBoundsOnModel.Width;
+                scaleY = layoutBoundsOnTex01->Height / _tmpBoundsOnModel.Height;
+            }
+
 
             // マスク生成時に使う行列を求める
             {
@@ -259,13 +302,16 @@ void CubismClippingManager_OpenGLES2::SetupClippingContext(CubismModel& model, C
                     // 今回専用の変換を適用して描く
                     // チャンネルも切り替える必要がある(A,R,G,B)
                     renderer->SetClippingContextBufferForMask(clipContext);
-                    renderer->DrawMesh(
-                        model.GetDrawableTextureIndices(clipDrawIndex),
+
+                    renderer->DrawMeshOpenGL(
+                        model.GetDrawableTextureIndex(clipDrawIndex),
                         model.GetDrawableVertexIndexCount(clipDrawIndex),
                         model.GetDrawableVertexCount(clipDrawIndex),
                         const_cast<csmUint16*>(model.GetDrawableVertexIndices(clipDrawIndex)),
                         const_cast<csmFloat32*>(model.GetDrawableVertices(clipDrawIndex)),
                         reinterpret_cast<csmFloat32*>(const_cast<Core::csmVector2*>(model.GetDrawableVertexUvs(clipDrawIndex))),
+                        model.GetMultiplyColor(clipDrawIndex),
+                        model.GetScreenColor(clipDrawIndex),
                         model.GetDrawableOpacity(clipDrawIndex),
                         CubismRenderer::CubismBlendMode_Normal,   //クリッピングは通常描画を強制
                         false   // マスク生成時はクリッピングの反転使用は全く関係がない
@@ -288,7 +334,7 @@ void CubismClippingManager_OpenGLES2::CalcClippedDrawTotalBounds(CubismModel& mo
 {
     // 被クリッピングマスク（マスクされる描画オブジェクト）の全体の矩形
     csmFloat32 clippedDrawTotalMinX = FLT_MAX, clippedDrawTotalMinY = FLT_MAX;
-    csmFloat32 clippedDrawTotalMaxX = FLT_MIN, clippedDrawTotalMaxY = FLT_MIN;
+    csmFloat32 clippedDrawTotalMaxX = -FLT_MAX, clippedDrawTotalMaxY = -FLT_MAX;
 
     // このマスクが実際に必要か判定する
     // このクリッピングを利用する「描画オブジェクト」がひとつでも使用可能であればマスクを生成する必要がある
@@ -303,7 +349,7 @@ void CubismClippingManager_OpenGLES2::CalcClippedDrawTotalBounds(CubismModel& mo
         csmFloat32* drawableVertexes = const_cast<csmFloat32*>(model.GetDrawableVertices(drawableIndex));
 
         csmFloat32 minX = FLT_MAX, minY = FLT_MAX;
-        csmFloat32 maxX = FLT_MIN, maxY = FLT_MIN;
+        csmFloat32 maxX = -FLT_MAX, maxY = -FLT_MAX;
 
         csmInt32 loop = drawableVertexCount * Constant::VertexStep;
         for (csmInt32 pi = Constant::VertexOffset; pi < loop; pi += Constant::VertexStep)
@@ -473,12 +519,12 @@ csmVector<CubismClippingContext*>* CubismClippingManager_OpenGLES2::GetClippingC
     return &_clippingContextListForDraw;
 }
 
-void CubismClippingManager_OpenGLES2::SetClippingMaskBufferSize(csmInt32 size)
+void CubismClippingManager_OpenGLES2::SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height)
 {
-    _clippingMaskBufferSize = size;
+    _clippingMaskBufferSize = CubismVector2(width, height);
 }
 
-csmInt32 CubismClippingManager_OpenGLES2::GetClippingMaskBufferSize() const
+CubismVector2 CubismClippingManager_OpenGLES2::GetClippingMaskBufferSize() const
 {
     return _clippingMaskBufferSize;
 }
@@ -701,7 +747,7 @@ static const csmChar* VertShaderSrcSetupMask =
 static const csmChar* FragShaderSrcSetupMask =
 #if defined(CSM_TARGET_IPHONE_ES2) || defined(CSM_TARGET_ANDROID_ES2)
         "#version 100\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
 #else
         "#version 120\n"
 #endif
@@ -724,7 +770,7 @@ static const csmChar* FragShaderSrcSetupMask =
 static const csmChar* FragShaderSrcSetupMaskTegra =
         "#version 100\n"
         "#extension GL_NV_shader_framebuffer_fetch : enable\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
         "varying vec2 v_texCoord;"
         "varying vec4 v_myPos;"
         "uniform sampler2D s_texture0;"
@@ -787,29 +833,39 @@ static const csmChar* VertShaderSrcMasked =
 static const csmChar* FragShaderSrc =
 #if defined(CSM_TARGET_IPHONE_ES2) || defined(CSM_TARGET_ANDROID_ES2)
         "#version 100\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
 #else
         "#version 120\n"
 #endif
         "varying vec2 v_texCoord;" //v2f.texcoord
         "uniform sampler2D s_texture0;" //_MainTex
         "uniform vec4 u_baseColor;" //v2f.color
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 color = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 color = texColor * u_baseColor;"
         "gl_FragColor = vec4(color.rgb * color.a,  color.a);"
         "}";
 #if defined(CSM_TARGET_ANDROID_ES2)
 static const csmChar* FragShaderSrcTegra =
         "#version 100\n"
         "#extension GL_NV_shader_framebuffer_fetch : enable\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
         "varying vec2 v_texCoord;" //v2f.texcoord
         "uniform sampler2D s_texture0;" //_MainTex
         "uniform vec4 u_baseColor;" //v2f.color
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 color = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 color = texColor * u_baseColor;"
         "gl_FragColor = vec4(color.rgb * color.a,  color.a);"
         "}";
 #endif
@@ -818,28 +874,38 @@ static const csmChar* FragShaderSrcTegra =
 static const csmChar* FragShaderSrcPremultipliedAlpha =
 #if defined(CSM_TARGET_IPHONE_ES2) || defined(CSM_TARGET_ANDROID_ES2)
         "#version 100\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
 #else
         "#version 120\n"
 #endif
         "varying vec2 v_texCoord;" //v2f.texcoord
         "uniform sampler2D s_texture0;" //_MainTex
         "uniform vec4 u_baseColor;" //v2f.color
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "gl_FragColor = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+        "gl_FragColor = texColor * u_baseColor;"
         "}";
 #if defined(CSM_TARGET_ANDROID_ES2)
 static const csmChar* FragShaderSrcPremultipliedAlphaTegra =
         "#version 100\n"
         "#extension GL_NV_shader_framebuffer_fetch : enable\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
         "varying vec2 v_texCoord;" //v2f.texcoord
         "uniform sampler2D s_texture0;" //_MainTex
         "uniform vec4 u_baseColor;" //v2f.color
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "gl_FragColor = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+        "gl_FragColor = texColor * u_baseColor;"
         "}";
 #endif
 
@@ -847,7 +913,7 @@ static const csmChar* FragShaderSrcPremultipliedAlphaTegra =
 static const csmChar* FragShaderSrcMask =
 #if defined(CSM_TARGET_IPHONE_ES2) || defined(CSM_TARGET_ANDROID_ES2)
         "#version 100\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
 #else
         "#version 120\n"
 #endif
@@ -857,9 +923,14 @@ static const csmChar* FragShaderSrcMask =
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -870,16 +941,21 @@ static const csmChar* FragShaderSrcMask =
 static const csmChar* FragShaderSrcMaskTegra =
         "#version 100\n"
         "#extension GL_NV_shader_framebuffer_fetch : enable\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
         "varying vec2 v_texCoord;"
         "varying vec4 v_clipPos;"
         "uniform sampler2D s_texture0;"
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -892,7 +968,7 @@ static const csmChar* FragShaderSrcMaskTegra =
 static const csmChar* FragShaderSrcMaskInverted =
 #if defined(CSM_TARGET_IPHONE_ES2) || defined(CSM_TARGET_ANDROID_ES2)
         "#version 100\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
 #else
         "#version 120\n"
 #endif
@@ -902,9 +978,14 @@ static const csmChar* FragShaderSrcMaskInverted =
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -915,16 +996,21 @@ static const csmChar* FragShaderSrcMaskInverted =
 static const csmChar* FragShaderSrcMaskInvertedTegra =
         "#version 100\n"
         "#extension GL_NV_shader_framebuffer_fetch : enable\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
         "varying vec2 v_texCoord;"
         "varying vec4 v_clipPos;"
         "uniform sampler2D s_texture0;"
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = texColor.rgb + u_screenColor.rgb - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "col_formask.rgb = col_formask.rgb  * col_formask.a ;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
@@ -937,7 +1023,7 @@ static const csmChar* FragShaderSrcMaskInvertedTegra =
 static const csmChar* FragShaderSrcMaskPremultipliedAlpha =
 #if defined(CSM_TARGET_IPHONE_ES2) || defined(CSM_TARGET_ANDROID_ES2)
         "#version 100\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
 #else
         "#version 120\n"
 #endif
@@ -947,9 +1033,14 @@ static const csmChar* FragShaderSrcMaskPremultipliedAlpha =
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
         "col_formask = col_formask * maskVal;"
@@ -959,16 +1050,21 @@ static const csmChar* FragShaderSrcMaskPremultipliedAlpha =
 static const csmChar* FragShaderSrcMaskPremultipliedAlphaTegra =
         "#version 100\n"
         "#extension GL_NV_shader_framebuffer_fetch : enable\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
         "varying vec2 v_texCoord;"
         "varying vec4 v_clipPos;"
         "uniform sampler2D s_texture0;"
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
         "col_formask = col_formask * maskVal;"
@@ -980,7 +1076,7 @@ static const csmChar* FragShaderSrcMaskPremultipliedAlphaTegra =
 static const csmChar* FragShaderSrcMaskInvertedPremultipliedAlpha =
 #if defined(CSM_TARGET_IPHONE_ES2) || defined(CSM_TARGET_ANDROID_ES2)
         "#version 100\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
 #else
         "#version 120\n"
 #endif
@@ -990,9 +1086,14 @@ static const csmChar* FragShaderSrcMaskInvertedPremultipliedAlpha =
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
         "col_formask = col_formask * (1.0 - maskVal);"
@@ -1002,16 +1103,21 @@ static const csmChar* FragShaderSrcMaskInvertedPremultipliedAlpha =
 static const csmChar* FragShaderSrcMaskInvertedPremultipliedAlphaTegra =
         "#version 100\n"
         "#extension GL_NV_shader_framebuffer_fetch : enable\n"
-        "precision mediump float;"
+        "precision " CSM_FRAGMENT_SHADER_FP_PRECISION " float;"
         "varying vec2 v_texCoord;"
         "varying vec4 v_clipPos;"
         "uniform sampler2D s_texture0;"
         "uniform sampler2D s_texture1;"
         "uniform vec4 u_channelFlag;"
         "uniform vec4 u_baseColor;"
+        "uniform vec4 u_multiplyColor;"
+        "uniform vec4 u_screenColor;"
         "void main()"
         "{"
-        "vec4 col_formask = texture2D(s_texture0 , v_texCoord) * u_baseColor;"
+        "vec4 texColor = texture2D(s_texture0 , v_texCoord);"
+        "texColor.rgb = texColor.rgb * u_multiplyColor.rgb;"
+        "texColor.rgb = (texColor.rgb + u_screenColor.rgb * texColor.a) - (texColor.rgb * u_screenColor.rgb);"
+        "vec4 col_formask = texColor * u_baseColor;"
         "vec4 clipMask = (1.0 - texture2D(s_texture1, v_clipPos.xy / v_clipPos.w)) * u_channelFlag;"
         "float maskVal = clipMask.r + clipMask.g + clipMask.b + clipMask.a;"
         "col_formask = col_formask * (1.0 - maskVal);"
@@ -1136,6 +1242,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[0]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[0]->ShaderProgram, "u_clipMatrix");
     _shaderSets[0]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[0]->ShaderProgram, "u_channelFlag");
     _shaderSets[0]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[0]->ShaderProgram, "u_baseColor");
+    _shaderSets[0]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[0]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[0]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[0]->ShaderProgram, "u_screenColor");
 
     // 通常
     _shaderSets[1]->AttributePositionLocation = glGetAttribLocation(_shaderSets[1]->ShaderProgram, "a_position");
@@ -1143,6 +1251,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[1]->SamplerTexture0Location = glGetUniformLocation(_shaderSets[1]->ShaderProgram, "s_texture0");
     _shaderSets[1]->UniformMatrixLocation = glGetUniformLocation(_shaderSets[1]->ShaderProgram, "u_matrix");
     _shaderSets[1]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[1]->ShaderProgram, "u_baseColor");
+    _shaderSets[1]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[1]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[1]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[1]->ShaderProgram, "u_screenColor");
 
     // 通常（クリッピング）
     _shaderSets[2]->AttributePositionLocation = glGetAttribLocation(_shaderSets[2]->ShaderProgram, "a_position");
@@ -1153,6 +1263,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[2]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[2]->ShaderProgram, "u_clipMatrix");
     _shaderSets[2]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[2]->ShaderProgram, "u_channelFlag");
     _shaderSets[2]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[2]->ShaderProgram, "u_baseColor");
+    _shaderSets[2]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[2]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[2]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[2]->ShaderProgram, "u_screenColor");
 
     // 通常（クリッピング・反転）
     _shaderSets[3]->AttributePositionLocation = glGetAttribLocation(_shaderSets[3]->ShaderProgram, "a_position");
@@ -1163,6 +1275,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[3]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[3]->ShaderProgram, "u_clipMatrix");
     _shaderSets[3]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[3]->ShaderProgram, "u_channelFlag");
     _shaderSets[3]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[3]->ShaderProgram, "u_baseColor");
+    _shaderSets[3]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[3]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[3]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[3]->ShaderProgram, "u_screenColor");
 
     // 通常（PremultipliedAlpha）
     _shaderSets[4]->AttributePositionLocation = glGetAttribLocation(_shaderSets[4]->ShaderProgram, "a_position");
@@ -1170,6 +1284,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[4]->SamplerTexture0Location = glGetUniformLocation(_shaderSets[4]->ShaderProgram, "s_texture0");
     _shaderSets[4]->UniformMatrixLocation = glGetUniformLocation(_shaderSets[4]->ShaderProgram, "u_matrix");
     _shaderSets[4]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[4]->ShaderProgram, "u_baseColor");
+    _shaderSets[4]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[4]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[4]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[4]->ShaderProgram, "u_screenColor");
 
     // 通常（クリッピング、PremultipliedAlpha）
     _shaderSets[5]->AttributePositionLocation = glGetAttribLocation(_shaderSets[5]->ShaderProgram, "a_position");
@@ -1180,6 +1296,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[5]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[5]->ShaderProgram, "u_clipMatrix");
     _shaderSets[5]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[5]->ShaderProgram, "u_channelFlag");
     _shaderSets[5]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[5]->ShaderProgram, "u_baseColor");
+    _shaderSets[5]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[5]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[5]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[5]->ShaderProgram, "u_screenColor");
 
     // 通常（クリッピング・反転、PremultipliedAlpha）
     _shaderSets[6]->AttributePositionLocation = glGetAttribLocation(_shaderSets[6]->ShaderProgram, "a_position");
@@ -1190,6 +1308,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[6]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[6]->ShaderProgram, "u_clipMatrix");
     _shaderSets[6]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[6]->ShaderProgram, "u_channelFlag");
     _shaderSets[6]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[6]->ShaderProgram, "u_baseColor");
+    _shaderSets[6]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[6]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[6]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[6]->ShaderProgram, "u_screenColor");
 
     // 加算
     _shaderSets[7]->AttributePositionLocation = glGetAttribLocation(_shaderSets[7]->ShaderProgram, "a_position");
@@ -1197,6 +1317,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[7]->SamplerTexture0Location = glGetUniformLocation(_shaderSets[7]->ShaderProgram, "s_texture0");
     _shaderSets[7]->UniformMatrixLocation = glGetUniformLocation(_shaderSets[7]->ShaderProgram, "u_matrix");
     _shaderSets[7]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[7]->ShaderProgram, "u_baseColor");
+    _shaderSets[7]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[7]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[7]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[7]->ShaderProgram, "u_screenColor");
 
     // 加算（クリッピング）
     _shaderSets[8]->AttributePositionLocation = glGetAttribLocation(_shaderSets[8]->ShaderProgram, "a_position");
@@ -1207,6 +1329,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[8]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[8]->ShaderProgram, "u_clipMatrix");
     _shaderSets[8]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[8]->ShaderProgram, "u_channelFlag");
     _shaderSets[8]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[8]->ShaderProgram, "u_baseColor");
+    _shaderSets[8]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[8]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[8]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[8]->ShaderProgram, "u_screenColor");
 
     // 加算（クリッピング・反転）
     _shaderSets[9]->AttributePositionLocation = glGetAttribLocation(_shaderSets[9]->ShaderProgram, "a_position");
@@ -1217,6 +1341,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[9]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[9]->ShaderProgram, "u_clipMatrix");
     _shaderSets[9]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[9]->ShaderProgram, "u_channelFlag");
     _shaderSets[9]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[9]->ShaderProgram, "u_baseColor");
+    _shaderSets[9]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[9]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[9]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[9]->ShaderProgram, "u_screenColor");
 
     // 加算（PremultipliedAlpha）
     _shaderSets[10]->AttributePositionLocation = glGetAttribLocation(_shaderSets[10]->ShaderProgram, "a_position");
@@ -1224,6 +1350,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[10]->SamplerTexture0Location = glGetUniformLocation(_shaderSets[10]->ShaderProgram, "s_texture0");
     _shaderSets[10]->UniformMatrixLocation = glGetUniformLocation(_shaderSets[10]->ShaderProgram, "u_matrix");
     _shaderSets[10]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[10]->ShaderProgram, "u_baseColor");
+    _shaderSets[10]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[10]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[10]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[10]->ShaderProgram, "u_screenColor");
 
     // 加算（クリッピング、PremultipliedAlpha）
     _shaderSets[11]->AttributePositionLocation = glGetAttribLocation(_shaderSets[11]->ShaderProgram, "a_position");
@@ -1234,6 +1362,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[11]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[11]->ShaderProgram, "u_clipMatrix");
     _shaderSets[11]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[11]->ShaderProgram, "u_channelFlag");
     _shaderSets[11]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[11]->ShaderProgram, "u_baseColor");
+    _shaderSets[11]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[11]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[11]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[11]->ShaderProgram, "u_screenColor");
 
     // 加算（クリッピング・反転、PremultipliedAlpha）
     _shaderSets[12]->AttributePositionLocation = glGetAttribLocation(_shaderSets[12]->ShaderProgram, "a_position");
@@ -1244,6 +1374,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[12]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[12]->ShaderProgram, "u_clipMatrix");
     _shaderSets[12]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[12]->ShaderProgram, "u_channelFlag");
     _shaderSets[12]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[12]->ShaderProgram, "u_baseColor");
+    _shaderSets[12]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[12]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[12]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[12]->ShaderProgram, "u_screenColor");
 
     // 乗算
     _shaderSets[13]->AttributePositionLocation = glGetAttribLocation(_shaderSets[13]->ShaderProgram, "a_position");
@@ -1251,6 +1383,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[13]->SamplerTexture0Location = glGetUniformLocation(_shaderSets[13]->ShaderProgram, "s_texture0");
     _shaderSets[13]->UniformMatrixLocation = glGetUniformLocation(_shaderSets[13]->ShaderProgram, "u_matrix");
     _shaderSets[13]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[13]->ShaderProgram, "u_baseColor");
+    _shaderSets[13]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[13]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[13]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[13]->ShaderProgram, "u_screenColor");
 
     // 乗算（クリッピング）
     _shaderSets[14]->AttributePositionLocation = glGetAttribLocation(_shaderSets[14]->ShaderProgram, "a_position");
@@ -1261,6 +1395,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[14]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[14]->ShaderProgram, "u_clipMatrix");
     _shaderSets[14]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[14]->ShaderProgram, "u_channelFlag");
     _shaderSets[14]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[14]->ShaderProgram, "u_baseColor");
+    _shaderSets[14]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[14]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[14]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[14]->ShaderProgram, "u_screenColor");
 
     // 乗算（クリッピング・反転）
     _shaderSets[15]->AttributePositionLocation = glGetAttribLocation(_shaderSets[15]->ShaderProgram, "a_position");
@@ -1271,6 +1407,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[15]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[15]->ShaderProgram, "u_clipMatrix");
     _shaderSets[15]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[15]->ShaderProgram, "u_channelFlag");
     _shaderSets[15]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[15]->ShaderProgram, "u_baseColor");
+    _shaderSets[15]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[15]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[15]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[15]->ShaderProgram, "u_screenColor");
 
     // 乗算（PremultipliedAlpha）
     _shaderSets[16]->AttributePositionLocation = glGetAttribLocation(_shaderSets[16]->ShaderProgram, "a_position");
@@ -1278,6 +1416,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[16]->SamplerTexture0Location = glGetUniformLocation(_shaderSets[16]->ShaderProgram, "s_texture0");
     _shaderSets[16]->UniformMatrixLocation = glGetUniformLocation(_shaderSets[16]->ShaderProgram, "u_matrix");
     _shaderSets[16]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[16]->ShaderProgram, "u_baseColor");
+    _shaderSets[16]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[16]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[16]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[16]->ShaderProgram, "u_screenColor");
 
     // 乗算（クリッピング、PremultipliedAlpha）
     _shaderSets[17]->AttributePositionLocation = glGetAttribLocation(_shaderSets[17]->ShaderProgram, "a_position");
@@ -1288,6 +1428,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[17]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[17]->ShaderProgram, "u_clipMatrix");
     _shaderSets[17]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[17]->ShaderProgram, "u_channelFlag");
     _shaderSets[17]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[17]->ShaderProgram, "u_baseColor");
+    _shaderSets[17]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[17]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[17]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[17]->ShaderProgram, "u_screenColor");
 
     // 乗算（クリッピング・反転、PremultipliedAlpha）
     _shaderSets[18]->AttributePositionLocation = glGetAttribLocation(_shaderSets[18]->ShaderProgram, "a_position");
@@ -1298,6 +1440,8 @@ void CubismShader_OpenGLES2::GenerateShaders()
     _shaderSets[18]->UniformClipMatrixLocation = glGetUniformLocation(_shaderSets[18]->ShaderProgram, "u_clipMatrix");
     _shaderSets[18]->UnifromChannelFlagLocation = glGetUniformLocation(_shaderSets[18]->ShaderProgram, "u_channelFlag");
     _shaderSets[18]->UniformBaseColorLocation = glGetUniformLocation(_shaderSets[18]->ShaderProgram, "u_baseColor");
+    _shaderSets[18]->UniformMultiplyColorLocation = glGetUniformLocation(_shaderSets[18]->ShaderProgram, "u_multiplyColor");
+    _shaderSets[18]->UniformScreenColorLocation = glGetUniformLocation(_shaderSets[18]->ShaderProgram, "u_screenColor");
 }
 
 void CubismShader_OpenGLES2::SetupShaderProgram(CubismRenderer_OpenGLES2* renderer, GLuint textureId
@@ -1305,6 +1449,8 @@ void CubismShader_OpenGLES2::SetupShaderProgram(CubismRenderer_OpenGLES2* render
                                                 , csmFloat32* uvArray, csmFloat32 opacity
                                                 , CubismRenderer::CubismBlendMode colorBlendMode
                                                 , CubismRenderer::CubismTextureColor baseColor
+                                                , CubismRenderer::CubismTextureColor multiplyColor
+                                                , CubismRenderer::CubismTextureColor screenColor
                                                 , csmBool isPremultipliedAlpha, CubismMatrix44 matrix4x4
                                                 , csmBool invertedMask)
 {
@@ -1350,6 +1496,8 @@ void CubismShader_OpenGLES2::SetupShaderProgram(CubismRenderer_OpenGLES2* render
                     rect->Y * 2.0f - 1.0f,
                     rect->GetRight() * 2.0f - 1.0f,
                     rect->GetBottom() * 2.0f - 1.0f);
+        glUniform4f(shaderSet->UniformMultiplyColorLocation, multiplyColor.R, multiplyColor.G, multiplyColor.B, multiplyColor.A);
+        glUniform4f(shaderSet->UniformScreenColorLocation, screenColor.R, screenColor.G, screenColor.B, screenColor.A);
 
         SRC_COLOR = GL_ZERO;
         DST_COLOR = GL_ONE_MINUS_SRC_COLOR;
@@ -1427,6 +1575,8 @@ void CubismShader_OpenGLES2::SetupShaderProgram(CubismRenderer_OpenGLES2* render
         glUniformMatrix4fv(shaderSet->UniformMatrixLocation, 1, 0, matrix4x4.GetArray()); //
 
         glUniform4f(shaderSet->UniformBaseColorLocation, baseColor.R, baseColor.G, baseColor.B, baseColor.A);
+        glUniform4f(shaderSet->UniformMultiplyColorLocation, multiplyColor.R, multiplyColor.G, multiplyColor.B, multiplyColor.A);
+        glUniform4f(shaderSet->UniformScreenColorLocation, screenColor.R, screenColor.G, screenColor.B, screenColor.A);
     }
 
     glBlendFuncSeparate(SRC_COLOR, DST_COLOR, SRC_ALPHA, DST_ALPHA);
@@ -1746,10 +1896,10 @@ CubismRenderer_OpenGLES2::~CubismRenderer_OpenGLES2()
 {
     CSM_DELETE_SELF(CubismClippingManager_OpenGLES2, _clippingManager);
 
-	if (_offscreenFrameBuffer.IsValid())
-	{
-		_offscreenFrameBuffer.DestroyOffscreenFrame();
-	}
+    if (_offscreenFrameBuffer.IsValid())
+    {
+        _offscreenFrameBuffer.DestroyOffscreenFrame();
+    }
 }
 
 void CubismRenderer_OpenGLES2::DoStaticRelease()
@@ -1773,7 +1923,7 @@ void CubismRenderer_OpenGLES2::Initialize(CubismModel* model)
             model->GetDrawableMaskCounts()
         );
 
-        _offscreenFrameBuffer.CreateOffscreenFrame(_clippingManager->GetClippingMaskBufferSize(), _clippingManager->GetClippingMaskBufferSize());
+        _offscreenFrameBuffer.CreateOffscreenFrame(_clippingManager->GetClippingMaskBufferSize().X, _clippingManager->GetClippingMaskBufferSize().Y);
     }
 
     _sortedDrawableIndexList.Resize(model->GetDrawableCount(), 0);
@@ -1822,12 +1972,12 @@ void CubismRenderer_OpenGLES2::DoDrawModel()
         PreDraw();
 
         // サイズが違う場合はここで作成しなおし
-        if (_offscreenFrameBuffer.GetBufferWidth() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()) ||
-            _offscreenFrameBuffer.GetBufferHeight() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()))
+        if (_offscreenFrameBuffer.GetBufferWidth() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().X) ||
+            _offscreenFrameBuffer.GetBufferHeight() != static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().Y))
         {
             _offscreenFrameBuffer.DestroyOffscreenFrame();
             _offscreenFrameBuffer.CreateOffscreenFrame(
-                static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()), static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize()));
+                static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().X), static_cast<csmUint32>(_clippingManager->GetClippingMaskBufferSize().Y));
         }
 
         _clippingManager->SetupClippingContext(*GetModel(), this, _rendererProfile._lastFBO, _rendererProfile._lastViewport);
@@ -1867,7 +2017,7 @@ void CubismRenderer_OpenGLES2::DoDrawModel()
             if(clipContext->_isUsing) // 書くことになっていた
             {
                 // 生成したFrameBufferと同じサイズでビューポートを設定
-                glViewport(0, 0, _clippingManager->GetClippingMaskBufferSize(), _clippingManager->GetClippingMaskBufferSize());
+                glViewport(0, 0, _clippingManager->GetClippingMaskBufferSize().X, _clippingManager->GetClippingMaskBufferSize().Y);
 
                 PreDraw(); // バッファをクリアする
 
@@ -1895,13 +2045,16 @@ void CubismRenderer_OpenGLES2::DoDrawModel()
                     // 今回専用の変換を適用して描く
                     // チャンネルも切り替える必要がある(A,R,G,B)
                     SetClippingContextBufferForMask(clipContext);
-                    DrawMesh(
-                        GetModel()->GetDrawableTextureIndices(clipDrawIndex),
+
+                    DrawMeshOpenGL(
+                        GetModel()->GetDrawableTextureIndex(clipDrawIndex),
                         GetModel()->GetDrawableVertexIndexCount(clipDrawIndex),
                         GetModel()->GetDrawableVertexCount(clipDrawIndex),
                         const_cast<csmUint16*>(GetModel()->GetDrawableVertexIndices(clipDrawIndex)),
                         const_cast<csmFloat32*>(GetModel()->GetDrawableVertices(clipDrawIndex)),
                         reinterpret_cast<csmFloat32*>(const_cast<Core::csmVector2*>(GetModel()->GetDrawableVertexUvs(clipDrawIndex))),
+                        GetModel()->GetMultiplyColor(clipDrawIndex),
+                        GetModel()->GetScreenColor(clipDrawIndex),
                         GetModel()->GetDrawableOpacity(clipDrawIndex),
                         CubismRenderer::CubismBlendMode_Normal,   //クリッピングは通常描画を強制
                         false // マスク生成時はクリッピングの反転使用は全く関係がない
@@ -1924,26 +2077,36 @@ void CubismRenderer_OpenGLES2::DoDrawModel()
 
         IsCulling(GetModel()->GetDrawableCulling(drawableIndex) != 0);
 
-        DrawMesh(
-            GetModel()->GetDrawableTextureIndices(drawableIndex),
+        DrawMeshOpenGL(
+            GetModel()->GetDrawableTextureIndex(drawableIndex),
             GetModel()->GetDrawableVertexIndexCount(drawableIndex),
             GetModel()->GetDrawableVertexCount(drawableIndex),
             const_cast<csmUint16*>(GetModel()->GetDrawableVertexIndices(drawableIndex)),
             const_cast<csmFloat32*>(GetModel()->GetDrawableVertices(drawableIndex)),
             reinterpret_cast<csmFloat32*>(const_cast<Core::csmVector2*>(GetModel()->GetDrawableVertexUvs(drawableIndex))),
+            GetModel()->GetMultiplyColor(drawableIndex),
+            GetModel()->GetScreenColor(drawableIndex),
             GetModel()->GetDrawableOpacity(drawableIndex),
             GetModel()->GetDrawableBlendMode(drawableIndex),
             GetModel()->GetDrawableInvertedMask(drawableIndex) // マスクを反転使用するか
         );
     }
 
-    //
     PostDraw();
 
 }
 
 void CubismRenderer_OpenGLES2::DrawMesh(csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
+    , csmUint16* indexArray, csmFloat32* vertexArray, csmFloat32* uvArray
+    , csmFloat32 opacity, CubismBlendMode colorBlendMode, csmBool invertedMask)
+{
+    CubismLogWarning("Use 'DrawMeshOpenGL' function");
+    CSM_ASSERT(0);
+}
+
+void CubismRenderer_OpenGLES2::DrawMeshOpenGL(csmInt32 textureNo, csmInt32 indexCount, csmInt32 vertexCount
                                         , csmUint16* indexArray, csmFloat32* vertexArray, csmFloat32* uvArray
+                                        , const CubismTextureColor& multiplyColor, const CubismTextureColor& screenColor
                                         , csmFloat32 opacity, CubismBlendMode colorBlendMode, csmBool invertedMask)
 {
 
@@ -1995,7 +2158,7 @@ void CubismRenderer_OpenGLES2::DrawMesh(csmInt32 textureNo, csmInt32 indexCount,
 
     CubismShader_OpenGLES2::GetInstance()->SetupShaderProgram(
         this, drawTextureId, vertexCount, vertexArray, uvArray
-        , opacity, colorBlendMode, modelColorRGBA, IsPremultipliedAlpha()
+        , opacity, colorBlendMode, modelColorRGBA, multiplyColor, screenColor, IsPremultipliedAlpha()
         , GetMvpMatrix(), invertedMask
     );
 
@@ -2028,14 +2191,14 @@ const csmMap<csmInt32, GLuint>& CubismRenderer_OpenGLES2::GetBindedTextures() co
     return _textures;
 }
 
-void CubismRenderer_OpenGLES2::SetClippingMaskBufferSize(csmInt32 size)
+void CubismRenderer_OpenGLES2::SetClippingMaskBufferSize(csmFloat32 width, csmFloat32 height)
 {
     //FrameBufferのサイズを変更するためにインスタンスを破棄・再作成する
     CSM_DELETE_SELF(CubismClippingManager_OpenGLES2, _clippingManager);
 
     _clippingManager = CSM_NEW CubismClippingManager_OpenGLES2();
 
-    _clippingManager->SetClippingMaskBufferSize(size);
+    _clippingManager->SetClippingMaskBufferSize(width, height);
 
     _clippingManager->Initialize(
         *GetModel(),
@@ -2045,9 +2208,14 @@ void CubismRenderer_OpenGLES2::SetClippingMaskBufferSize(csmInt32 size)
     );
 }
 
-csmInt32 CubismRenderer_OpenGLES2::GetClippingMaskBufferSize() const
+CubismVector2 CubismRenderer_OpenGLES2::GetClippingMaskBufferSize() const
 {
     return _clippingManager->GetClippingMaskBufferSize();
+}
+
+const CubismOffscreenFrame_OpenGLES2* CubismRenderer_OpenGLES2::GetMaskBuffer() const
+{
+    return &_offscreenFrameBuffer;
 }
 
 void CubismRenderer_OpenGLES2::SetClippingContextBufferForMask(CubismClippingContext* clip)

@@ -72,7 +72,7 @@ public:
      * @param[in]   userTimeSeconds デルタ時間の積算値[秒]
      * @return                      開始したモーションの識別番号を返す。個別のモーションが終了したか否かを判定するIsFinished()の引数で使用する。開始できない時は「-1」
      */
-    CubismMotionQueueEntryHandle    StartMotion(ACubismMotion* motion, csmBool autoDelete, csmFloat32 userTimeSeconds, bool stopOtherMotion = true);
+    CubismMotionQueueEntryHandle    StartMotion(ACubismMotion* motion, csmBool autoDelete, csmFloat32 userTimeSeconds);
 
     /**
      * @brief すべてのモーションの終了の確認
@@ -131,10 +131,11 @@ protected:
     *
     * @param[in]   model   対象のモデル
     * @param[in]   userTimeSeconds   デルタ時間の積算値[秒]
+    * @param[in][out]   opacity 透明度の値（Nullable）
     * @retval  true    モデルへパラメータ値の反映あり
     * @retval  false   モデルへパラメータ値の反映なし(モーションの変化なし)
     */
-    virtual csmBool     DoUpdateMotion(CubismModel* model, csmFloat32 userTimeSeconds);
+    virtual csmBool     DoUpdateMotion(CubismModel* model, csmFloat32 userTimeSeconds, csmFloat32* opacity = NULL);
 
 
     csmFloat32 _userTimeSeconds;        ///< デルタ時間の積算値[秒]

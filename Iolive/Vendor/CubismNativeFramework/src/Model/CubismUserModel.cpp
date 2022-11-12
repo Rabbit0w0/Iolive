@@ -79,6 +79,7 @@ void CubismUserModel::SetAcceleration(csmFloat32 x, csmFloat32 y, csmFloat32 z)
 void CubismUserModel::LoadModel(const csmByte* buffer, csmSizeInt size)
 {
     _moc = CubismMoc::Create(buffer, size);
+
     if (_moc == NULL)
     {
         CubismLogError("Failed to CubismMoc::Create().");
@@ -86,6 +87,7 @@ void CubismUserModel::LoadModel(const csmByte* buffer, csmSizeInt size)
     }
 
     _model = _moc->CreateModel();
+
     if (_model == NULL)
     {
         CubismLogError("Failed to CreateModel().");
@@ -93,7 +95,6 @@ void CubismUserModel::LoadModel(const csmByte* buffer, csmSizeInt size)
     }
 
     _model->SaveParameters();
-
     _modelMatrix = CSM_NEW CubismModelMatrix(_model->GetCanvasWidth(), _model->GetCanvasHeight());
 
 }
