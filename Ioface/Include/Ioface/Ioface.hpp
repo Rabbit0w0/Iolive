@@ -60,6 +60,7 @@ public:
 	
 	// tracking delay in milliseconds
 	int TrackingDelay;
+	int TrackingFrequency;
 
 	// parameter properties
 	float DistScale = 1.f;

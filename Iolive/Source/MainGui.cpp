@@ -260,6 +260,12 @@ namespace Iolive {
 						ImGui::SliderInt("Tracking delay", &(app->m_Ioface.TrackingDelay), 0, 40,
 							app->m_Ioface.TrackingDelay == 0 ? "No delay" : "%dms"
 						);
+
+						ImGui::Spacing(); ImGui::SameLine();
+						ImGui::SliderInt("Tracking frequency", &(app->m_Ioface.TrackingFrequency), 0, 500,
+							app->m_Ioface.TrackingFrequency == 0 ? "Realtime" : "%dms"
+						);
+
 						ImGui::PopItemWidth();
 
 						ImGui::Spacing(); ImGui::SameLine();

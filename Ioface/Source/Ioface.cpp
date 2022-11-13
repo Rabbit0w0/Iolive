@@ -9,7 +9,7 @@
 #define INGFO std::cout << "[IOFACE][DEBUG] "
 
 Ioface::Ioface()
-	: m_Initialized(false), m_IsDetected(false), m_DoDisplayErrors(true), m_WaitingFaceHasPrinted(false), TrackingDelay(0)
+	: m_Initialized(false), m_IsDetected(false), m_DoDisplayErrors(true), m_WaitingFaceHasPrinted(false), TrackingDelay(0), TrackingFrequency(0)
 {
 }
 

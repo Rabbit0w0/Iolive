@@ -106,6 +106,7 @@ namespace Iolive {
 		bool frameClosed = true;
 		while (!flags_StopCapture)
 		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(m_Ioface.TrackingFrequency));
 			m_Ioface.UpdateAll();
 
 			if (MainGui::Get().Checkbox_ShowFrame.IsChecked())
@@ -382,6 +383,7 @@ namespace Iolive {
 		}
 	}
 
+	// TODO: Remember them in configuration
 	void Application::OnFrameResizedCallback(int width, int height)
 	{
 		Application::Get()->OnRender();
