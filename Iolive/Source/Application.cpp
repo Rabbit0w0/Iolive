@@ -467,6 +467,8 @@ namespace Iolive {
 		#define SMOOTH_MEDIUM(start, end) MathUtils::Lerp(start, end, deltaTime * 8.f)
 		#define SMOOTH_FAST(start, end) MathUtils::Lerp(start, end, deltaTime * 16.f)
 
+		#define CLAMP01(num) std::clamp(num, 0.0f, 1.0f)
+
 		// ParamAngle
 		OptimizedParameter.ParamAngleX = SMOOTH_SLOW(OptimizedParameter.ParamAngleX, m_Ioface.AngleX);
 		OptimizedParameter.ParamAngleY = SMOOTH_SLOW(OptimizedParameter.ParamAngleY, m_Ioface.AngleY * 1.3f);
@@ -479,6 +481,7 @@ namespace Iolive {
 
 		// MouthOpenY
 		float normalizedMouthOpenY = MathUtils::Normalize(m_Ioface.DistScale * m_Ioface.MouthOpenY, 3.0f, 15.0f);
+		normalizedMouthOpenY = normalizedMouthOpenY > 0.88 ? 1 : (normalizedMouthOpenY < 0.16 ? 0 : normalizedMouthOpenY); // Do not jitter
 		OptimizedParameter.ParamMouthOpenY = SMOOTH_FAST(OptimizedParameter.ParamMouthOpenY, normalizedMouthOpenY);
 
 		// MouthForm
@@ -488,9 +491,9 @@ namespace Iolive {
 		if (MainGui::Get().Checkbox_EqualizeEyes.IsChecked())
 		{
 			// Equalize EyeOpenY Left & Right value
-			float normalizedEAR = MathUtils::Normalize(m_Ioface.DistScale * m_Ioface.EAR, m_Ioface.DistScale * 0.11f, m_Ioface.DistScale * 0.26f);
-			OptimizedParameter.ParamEyeLOpen = SMOOTH_MEDIUM(OptimizedParameter.ParamEyeLOpen, normalizedEAR);
-			OptimizedParameter.ParamEyeROpen = OptimizedParameter.ParamEyeLOpen; // same
+			float normalizedLEAR = MathUtils::Normalize(m_Ioface.DistScale * m_Ioface.EAR, m_Ioface.DistScale * 0.11f, m_Ioface.DistScale * 0.26f);
+			float normalizedREAR = MathUtils::Normalize(m_Ioface.DistScale * m_Ioface.RightEAR, m_Ioface.DistScale * 0.11f, m_Ioface.DistScale * 0.26f);
+			OptimizedParameter.ParamEyeROpen = OptimizedParameter.ParamEyeLOpen = SMOOTH_MEDIUM(OptimizedParameter.ParamEyeLOpen, (normalizedLEAR + normalizedREAR) / 2.0f);
 		}
 		else
 		{
